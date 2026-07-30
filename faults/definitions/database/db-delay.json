@@ -1,0 +1,11 @@
+{
+  "name": "db-delay",
+  "category": "database",
+  "type": "app",
+  "target": { "service": "product-service", "port": 3001 },
+  "description": "Adds 2s latency to product-service (simulates slow DB queries).",
+  "inject":  { "endpoint": "/admin/inject/delay", "body": { "ms": 2000 } },
+  "recover": { "endpoint": "/admin/inject/reset" },
+  "expectedSymptoms": ["product p95 latency spike", "order latency spike"],
+  "detectionSignal": "p95 latency on product-service exceeds baseline"
+}

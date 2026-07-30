@@ -1,0 +1,11 @@
+{
+  "name": "service-crash",
+  "category": "infrastructure",
+  "type": "infra",
+  "target": { "container": "payment-service" },
+  "description": "Stops payment-service entirely to simulate a crashed service.",
+  "inject":  { "command": "docker stop payment-service" },
+  "recover": { "command": "docker start payment-service" },
+  "expectedSymptoms": ["payment-service target DOWN in Prometheus", "order failures (502)"],
+  "detectionSignal": "up{job='payment-service'} == 0; order 5xx spike"
+}

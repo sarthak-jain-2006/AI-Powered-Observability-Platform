@@ -1,0 +1,10 @@
+{
+  "name": "db-down",
+  "category": "database",
+  "description": "Stops the product database container to simulate total DB outage",
+  "type": "infra",
+  "inject":  { "command": "docker stop product-db" },
+  "recover": { "command": "docker start product-db" },
+  "expectedSymptoms": ["product-service 5xx errors", "order failures (502)"],
+  "detectionSignal": "error_rate spike on product-service + order-service"
+}

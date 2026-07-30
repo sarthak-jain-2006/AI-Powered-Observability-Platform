@@ -1,0 +1,219 @@
+services:
+  product-db:
+    image: postgres:18
+    container_name: product-db
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: productdb
+    ports:
+      - "5433:5432"
+    volumes:
+      - product-db-data:/var/lib/postgresql
+
+  product-service:
+    build: ./services/product-service
+    container_name: product-service
+    ports:
+      - "3001:3001"
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@product-db:5432/productdb
+      PORT: 3001
+    depends_on:
+      - product-db
+    logging:
+      driver: loki
+      options:
+        loki-url: "http://localhost:3100/loki/api/v1/push"
+        loki-retries: "5"
+        loki-batch-size: "400"  
+
+  user-db:
+    image: postgres:18
+    container_name: user-db
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: userdb
+    ports:
+      - "5434:5432"
+    volumes:
+      - user-db-data:/var/lib/postgresql
+
+  user-service:
+    build: ./services/user-service
+    container_name: user-service
+    ports:
+      - "3002:3002"
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@user-db:5432/userdb
+      PORT: 3002
+      JWT_SECRET: a-long-random-secret-string-change-this-later
+    depends_on:
+      - user-db
+    logging:
+      driver: loki
+      options:
+        loki-url: "http://localhost:3100/loki/api/v1/push"
+        loki-retries: "5"
+        loki-batch-size: "400"  
+
+  cart-redis:
+    image: redis:7
+    container_name: cart-redis
+    ports:
+      - "6380:6379"
+
+  cart-service:
+    build: ./services/cart-service
+    container_name: cart-service
+    ports:
+      - "3003:3003"
+    environment:
+      REDIS_HOST: cart-redis
+      REDIS_PORT: 6379
+      PORT: 3003
+    depends_on:
+      - cart-redis
+    logging:
+      driver: loki
+      options:
+        loki-url: "http://localhost:3100/loki/api/v1/push"
+        loki-retries: "5"
+        loki-batch-size: "400"  
+
+  payment-db:
+    image: postgres:18
+    container_name: payment-db
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: paymentdb
+    ports:
+      - "5435:5432"
+    volumes:
+      - payment-db-data:/var/lib/postgresql
+
+  payment-service:
+    build: ./services/payment-service
+    container_name: payment-service
+    ports:
+      - "3004:3004"
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@payment-db:5432/paymentdb
+      PORT: 3004
+      PAYMENT_FAILURE_RATE: 0.05
+      PAYMENT_DELAY_MS: 300
+    depends_on:
+      - payment-db
+    logging:
+      driver: loki
+      options:
+        loki-url: "http://localhost:3100/loki/api/v1/push"
+        loki-retries: "5"
+        loki-batch-size: "400"  
+
+  order-db:
+    image: postgres:18
+    container_name: order-db
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: orderdb
+    ports:
+      - "5436:5432"
+    volumes:
+      - order-db-data:/var/lib/postgresql
+
+  order-service:
+    build: ./services/order-service
+    container_name: order-service
+    ports:
+      - "3005:3005"
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@order-db:5432/orderdb
+      PORT: 3005
+      PRODUCT_SERVICE_URL: http://product-service:3001
+      PAYMENT_SERVICE_URL: http://payment-service:3004
+    depends_on:
+      - order-db
+      - product-service
+      - payment-service
+    logging:
+      driver: loki
+      options:
+        loki-url: "http://localhost:3100/loki/api/v1/push"
+        loki-retries: "5"
+        loki-batch-size: "400"  
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    depends_on:
+      - product-service
+      - user-service
+      - cart-service
+      - payment-service
+      - order-service
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards
+    depends_on:
+      - prometheus
+
+  loki:
+    image: grafana/loki:latest
+    container_name: loki
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - loki-data:/loki    
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: jaeger
+    ports:
+      - "16686:16686"   # Jaeger UI
+      - "4317:4317"     # OTLP gRPC receiver (where your services send spans)
+      - "4318:4318"     # OTLP HTTP receiver
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"    
+  k6:
+    image: grafana/k6:latest
+    container_name: k6
+    volumes:
+      - ./load:/scripts
+    networks:
+      - default
+    profiles:
+      - loadtest
+      
+  ai-engine:
+    build: ./ai-engine
+    container_name: ai-engine
+    volumes:
+      - ./ai-engine/data:/app/data
+    depends_on:
+      - prometheus
+    networks:
+      - default    
+
+volumes:
+  product-db-data:
+  user-db-data:
+  payment-db-data:
+  order-db-data:
+  prometheus-data:
+  grafana-data:
+  loki-data:

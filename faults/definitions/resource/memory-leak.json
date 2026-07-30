@@ -1,0 +1,11 @@
+{
+  "name": "memory-leak",
+  "category": "resource",
+  "type": "app",
+  "target": { "service": "order-service", "port": 3005 },
+  "description": "Leaks 200 MB on order-service (held, never freed).",
+  "inject":  { "endpoint": "/admin/inject/memory", "body": { "mb": 200 } },
+  "recover": { "endpoint": "/admin/inject/reset" },
+  "expectedSymptoms": ["order-service RSS climbs and stays high"],
+  "detectionSignal": "process_resident_memory_bytes on order-service rises without recovery"
+}
