@@ -2,10 +2,23 @@
   "name": "cpu-stress",
   "category": "resource",
   "type": "app",
-  "target": { "service": "order-service", "port": 3005 },
-  "description": "Burns CPU on order-service for 20 seconds.",
-  "inject":  { "endpoint": "/admin/inject/cpu", "body": { "seconds": 20 } },
-  "recover": { "endpoint": "/admin/inject/reset" },
-  "expectedSymptoms": ["order-service latency rises", "event loop lag"],
+  "target": {
+    "service": "order-service",
+    "port": 3005
+  },
+  "description": "Burns CPU on order-service for the episode duration.",
+  "inject": {
+    "endpoint": "/admin/inject/cpu",
+    "body": {
+      "seconds": 180
+    }
+  },
+  "recover": {
+    "endpoint": "/admin/inject/reset"
+  },
+  "expectedSymptoms": [
+    "order-service latency rises",
+    "event loop lag"
+  ],
   "detectionSignal": "p95 latency spike + CPU-bound behavior on order-service"
 }

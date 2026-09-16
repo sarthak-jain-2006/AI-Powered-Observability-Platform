@@ -2,10 +2,20 @@
   "name": "redis-down",
   "category": "infrastructure",
   "type": "infra",
-  "target": { "container": "cart-redis" },
+  "target": {
+    "service": "cart-service",
+    "container": "cart-redis"
+  },
   "description": "Stops cart-redis to simulate a cache/store outage.",
-  "inject":  { "command": "docker stop cart-redis" },
-  "recover": { "command": "docker start cart-redis" },
-  "expectedSymptoms": ["cart-service 5xx", "cart operations fail"],
+  "inject": {
+    "command": "docker stop cart-redis"
+  },
+  "recover": {
+    "command": "docker start cart-redis"
+  },
+  "expectedSymptoms": [
+    "cart-service 5xx",
+    "cart operations fail"
+  ],
   "detectionSignal": "error_rate spike on cart-service"
 }

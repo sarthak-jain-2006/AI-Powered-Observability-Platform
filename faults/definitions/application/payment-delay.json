@@ -2,10 +2,34 @@
   "name": "payment-delay",
   "category": "application",
   "type": "app",
-  "target": { "service": "payment-service", "port": 3004 },
+  "target": {
+    "service": "payment-service",
+    "port": 3004
+  },
   "description": "Adds 3s latency to every payment-service request.",
-  "inject":  { "endpoint": "/admin/inject/delay", "body": { "ms": 3000 } },
-  "recover": { "endpoint": "/admin/inject/reset" },
-  "expectedSymptoms": ["payment p95 latency spike", "order latency spike"],
+  "inject": {
+    "endpoint": "/admin/inject/delay",
+    "body": {
+      "ms": 3000
+    }
+  },
+  "severities": {
+    "subtle": {
+      "ms": 200
+    },
+    "moderate": {
+      "ms": 800
+    },
+    "severe": {
+      "ms": 3000
+    }
+  },
+  "recover": {
+    "endpoint": "/admin/inject/reset"
+  },
+  "expectedSymptoms": [
+    "payment p95 latency spike",
+    "order latency spike"
+  ],
   "detectionSignal": "p95 latency on payment-service exceeds baseline"
 }

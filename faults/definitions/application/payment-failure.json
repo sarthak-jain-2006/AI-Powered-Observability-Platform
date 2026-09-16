@@ -2,10 +2,34 @@
   "name": "payment-failure",
   "category": "application",
   "type": "app",
-  "target": { "service": "payment-service", "port": 3004 },
+  "target": {
+    "service": "payment-service",
+    "port": 3004
+  },
   "description": "Injects a high HTTP 500 error rate into payment-service.",
-  "inject":  { "endpoint": "/admin/inject/error-rate", "body": { "rate": 0.3 } },
-  "recover": { "endpoint": "/admin/inject/reset" },
-  "expectedSymptoms": ["payment-service 5xx spike", "order failures"],
+  "inject": {
+    "endpoint": "/admin/inject/error-rate",
+    "body": {
+      "rate": 0.3
+    }
+  },
+  "severities": {
+    "subtle": {
+      "rate": 0.02
+    },
+    "moderate": {
+      "rate": 0.1
+    },
+    "severe": {
+      "rate": 0.3
+    }
+  },
+  "recover": {
+    "endpoint": "/admin/inject/reset"
+  },
+  "expectedSymptoms": [
+    "payment-service 5xx spike",
+    "order failures"
+  ],
   "detectionSignal": "5xx error_rate on payment-service rises sharply"
 }
