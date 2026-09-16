@@ -60,8 +60,19 @@ def collect_metrics():
     # Memory (RSS bytes -> MB) per service
     memory = _to_map(_query('process_resident_memory_bytes'))
 
-    # Service up/down
+    # CPU seconds consumed per second -- effectively "cores in use".
+    # Without this the cpu-stress fault has no direct signal at all and has to
+    # be inferred from latency alone.
+    cpu = _to_map(_query('rate(process_cpu_seconds_total[1m])'))
+
+    # Service up/down.
+    # An empty result here means Prometheus itself could not be reached, not
+    # that every service died: `up` always returns a series per scrape target
+    # on a healthy Prometheus. Defaulting that to 0 made the whole fleet look
+    # down every time the collector started before Prometheus was ready, which
+    # is a false alarm on all five services at once.
     up = _to_map(_query('up'))
+    prometheus_reachable = bool(up)
 
     # Assemble per-service metric dicts
     metrics = {}
@@ -71,6 +82,8 @@ def collect_metrics():
             "p95_latency": round(p95.get(svc, 0.0), 4),
             "request_rate": round(req_rate.get(svc, 0.0), 4),
             "memory_mb": round(memory.get(svc, 0.0) / (1024 * 1024), 2),
-            "up": int(up.get(svc, 0)),
+            "cpu_cores": round(cpu.get(svc, 0.0), 4),
+            # None = unknown, distinct from 0 = scraped and confirmed down
+            "up": int(up.get(svc, 0)) if prometheus_reachable else None,
         }
     return metrics
