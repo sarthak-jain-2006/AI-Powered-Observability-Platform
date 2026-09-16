@@ -11,6 +11,8 @@ const faultState = {
   errorRate: 0,       // 0.0–1.0: fraction of requests to fail with HTTP 500
   extraDelayMs: 0,    // artificial latency added to each request (ms)
   memoryLeak: [],     // holds allocated buffers so GC cannot reclaim them
+  leakTimer: null,    // interval driving a gradual leak, so reset can stop it
+  cpuUntil: 0,        // epoch ms the CPU burn should stop; reset sets it to 0
 };
 
 // --- Middleware: applied to every incoming request, injects active faults ---
@@ -57,35 +59,109 @@ router.post('/inject/delay', express.json(), (req, res) => {
   res.json({ injected: 'delay', ms });
 });
 
-// CPU stress:  POST /admin/inject/cpu  { "seconds": 10 }
-// Burns CPU with busy work for the duration (spikes CPU usage).
+// CPU stress:  POST /admin/inject/cpu  { "seconds": 180, "intensity": 0.4 }
+//
+// `intensity` is the duty cycle: the fraction of each 50ms slice spent spinning
+// rather than yielding. Without it every CPU fault is full-throttle, which
+// makes the fault trivially detectable and leaves no subtle variant to test
+// against. 1.0 reproduces the original behaviour.
 router.post('/inject/cpu', express.json(), (req, res) => {
   const seconds = parseInt(req.body.seconds) || 5;
-  res.json({ injected: 'cpu', seconds });   // respond BEFORE burning
-  const end = Date.now() + seconds * 1000;
+  const raw = req.body.intensity === undefined ? 1 : parseFloat(req.body.intensity);
+  const intensity = Math.min(1, Math.max(0.05, isNaN(raw) ? 1 : raw));
+
+  res.json({ injected: 'cpu', seconds, intensity });   // respond BEFORE burning
+
+  const SLICE_MS = 50;
+  const spinMs = Math.max(1, Math.round(SLICE_MS * intensity));
+  const restMs = SLICE_MS - spinMs;
+
+  faultState.cpuUntil = Date.now() + seconds * 1000;
+
   function burn() {
-    const spinUntil = Date.now() + 50;             // spin 50ms
+    // Read the deadline from state rather than closing over it, so /reset can
+    // stop an in-flight burn by zeroing it.
+    if (Date.now() >= faultState.cpuUntil) {
+      faultState.cpuUntil = 0;
+      return;
+    }
+    const spinUntil = Date.now() + spinMs;
     while (Date.now() < spinUntil) { Math.sqrt(Math.random()); }
-    if (Date.now() < end) setImmediate(burn);      // yield, then continue
+    // Resting via setTimeout leaves the event loop genuinely idle between
+    // slices; setImmediate would re-enter at once and pin the core regardless
+    // of the requested intensity.
+    if (restMs > 0) setTimeout(burn, restMs);
+    else setImmediate(burn);
   }
   burn();
 });
 
-// Memory leak:  POST /admin/inject/memory  { "mb": 100 }
-// Allocates and RETAINS memory (never freed) to simulate a leak.
+// Memory leak:  POST /admin/inject/memory  { "mb": 200, "overSeconds": 600 }
+//
+// With `overSeconds` the memory is allocated incrementally instead of all at
+// once. That difference matters: a single allocation is a step change that any
+// threshold catches, whereas a real leak is slow drift whose current reading
+// looks unremarkable and only its trend gives away. Drift is the case the
+// long-horizon slope features exist to detect, so it needs a fault that
+// actually produces it. Omitting overSeconds keeps the original one-shot
+// behaviour.
 router.post('/inject/memory', express.json(), (req, res) => {
   const mb = parseInt(req.body.mb) || 50;
-  for (let i = 0; i < mb; i++) {
-    faultState.memoryLeak.push(Buffer.alloc(1024 * 1024, 1)); // 1 MB each, held forever
+  const overSeconds = parseInt(req.body.overSeconds) || 0;
+
+  const allocate = (count) => {
+    for (let i = 0; i < count; i++) {
+      faultState.memoryLeak.push(Buffer.alloc(1024 * 1024, 1)); // 1 MB, held forever
+    }
+  };
+
+  if (faultState.leakTimer) {
+    clearInterval(faultState.leakTimer);
+    faultState.leakTimer = null;
   }
-  res.json({ injected: 'memory', mb, totalLeakedMb: faultState.memoryLeak.length });
+
+  if (overSeconds <= 0) {
+    allocate(mb);
+    return res.json({
+      injected: 'memory', mode: 'immediate', mb,
+      totalLeakedMb: faultState.memoryLeak.length,
+    });
+  }
+
+  res.json({ injected: 'memory', mode: 'gradual', mb, overSeconds });
+
+  const TICK_MS = 1000;
+  const ticks = Math.max(1, Math.round((overSeconds * 1000) / TICK_MS));
+  const startedAt = Date.now();
+  const startingMb = faultState.memoryLeak.length;
+
+  faultState.leakTimer = setInterval(() => {
+    // Derive the target from elapsed time rather than accumulating per tick, so
+    // a delayed or skipped timer does not permanently shrink the leak.
+    const elapsed = (Date.now() - startedAt) / (overSeconds * 1000);
+    const target = startingMb + Math.min(mb, Math.round(mb * Math.min(1, elapsed)));
+    const shortfall = target - faultState.memoryLeak.length;
+    if (shortfall > 0) allocate(shortfall);
+
+    if (faultState.memoryLeak.length >= startingMb + mb) {
+      clearInterval(faultState.leakTimer);
+      faultState.leakTimer = null;
+    }
+  }, TICK_MS);
 });
 
 // Reset all faults:  POST /admin/inject/reset
 router.post('/inject/reset', (req, res) => {
   faultState.errorRate = 0;
   faultState.extraDelayMs = 0;
-  faultState.memoryLeak = [];   // drop references → GC reclaims the leaked memory
+  // Stop a gradual leak still in progress, or it keeps allocating after recovery
+  // and the next episode starts from a dirty baseline.
+  if (faultState.leakTimer) {
+    clearInterval(faultState.leakTimer);
+    faultState.leakTimer = null;
+  }
+  faultState.cpuUntil = 0;          // stops any in-flight CPU burn
+  faultState.memoryLeak = [];       // drop references → GC reclaims the leaked memory
   res.json({ reset: true });
 });
 
@@ -95,6 +171,8 @@ router.get('/inject/status', (req, res) => {
     errorRate: faultState.errorRate,
     extraDelayMs: faultState.extraDelayMs,
     leakedMb: faultState.memoryLeak.length,
+    leaking: Boolean(faultState.leakTimer),
+    cpuBurning: faultState.cpuUntil > Date.now(),
   });
 });
 
