@@ -1,6 +1,0 @@
-loki:
-  image: grafana/loki:latest
-  command: -config.file=/etc/loki/loki-config.yaml
-  volumes:
-    - ./observability/loki/loki-config.yaml:/etc/loki/loki-config.yaml:ro
-    - loki-data:/loki
