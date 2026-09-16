@@ -1,6 +1,6 @@
 import http from 'k6/http';
 import { check, sleep } from 'k6';
-import { PRODUCT, CART, ORDER, JSON_HEADERS, orderBody, cartItemBody } from './config.js';
+import { PRODUCT, CART, ORDER, USER, JSON_HEADERS, orderBody, cartItemBody, signupBody } from './config.js';
 
 // Full shopping journey under steady load:
 // browse -> add to cart -> view cart -> checkout.
@@ -15,6 +15,16 @@ export const options = {
 export default function () {
   // Each virtual user gets a distinct userId so their carts don't collide
   const userId = __VU;
+
+  // Sign up occasionally. Without this user-service receives no traffic at all
+  // and has no baseline behaviour to learn -- it was flat zero in every
+  // snapshot collected so far. Kept to a fraction of iterations so signups stay
+  // a minority of the mix, the way they are in a real storefront.
+  if (Math.random() < 0.2) {
+    const s = http.post(`${USER}/users/signup`, signupBody(), JSON_HEADERS);
+    check(s, { 'signed up': (r) => r.status === 201 || r.status === 409 });
+    sleep(1);
+  }
 
   // Browse
   const p = http.get(`${PRODUCT}/products/3`);
