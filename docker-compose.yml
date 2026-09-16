@@ -2,6 +2,7 @@ services:
   product-db:
     image: postgres:18
     container_name: product-db
+    restart: unless-stopped
     environment:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: productdb
@@ -13,6 +14,7 @@ services:
   product-service:
     build: ./services/product-service
     container_name: product-service
+    restart: unless-stopped
     ports:
       - "3001:3001"
     environment:
@@ -25,11 +27,13 @@ services:
       options:
         loki-url: "http://localhost:3100/loki/api/v1/push"
         loki-retries: "5"
-        loki-batch-size: "400"  
+        loki-batch-size: "400"
+        loki-external-labels: "compose_service={{.Name}},container_name={{.Name}}"
 
   user-db:
     image: postgres:18
     container_name: user-db
+    restart: unless-stopped
     environment:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: userdb
@@ -41,6 +45,7 @@ services:
   user-service:
     build: ./services/user-service
     container_name: user-service
+    restart: unless-stopped
     ports:
       - "3002:3002"
     environment:
@@ -54,17 +59,20 @@ services:
       options:
         loki-url: "http://localhost:3100/loki/api/v1/push"
         loki-retries: "5"
-        loki-batch-size: "400"  
+        loki-batch-size: "400"
+        loki-external-labels: "compose_service={{.Name}},container_name={{.Name}}"
 
   cart-redis:
     image: redis:7
     container_name: cart-redis
+    restart: unless-stopped
     ports:
       - "6380:6379"
 
   cart-service:
     build: ./services/cart-service
     container_name: cart-service
+    restart: unless-stopped
     ports:
       - "3003:3003"
     environment:
@@ -78,11 +86,13 @@ services:
       options:
         loki-url: "http://localhost:3100/loki/api/v1/push"
         loki-retries: "5"
-        loki-batch-size: "400"  
+        loki-batch-size: "400"
+        loki-external-labels: "compose_service={{.Name}},container_name={{.Name}}"
 
   payment-db:
     image: postgres:18
     container_name: payment-db
+    restart: unless-stopped
     environment:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: paymentdb
@@ -94,6 +104,7 @@ services:
   payment-service:
     build: ./services/payment-service
     container_name: payment-service
+    restart: unless-stopped
     ports:
       - "3004:3004"
     environment:
@@ -108,11 +119,13 @@ services:
       options:
         loki-url: "http://localhost:3100/loki/api/v1/push"
         loki-retries: "5"
-        loki-batch-size: "400"  
+        loki-batch-size: "400"
+        loki-external-labels: "compose_service={{.Name}},container_name={{.Name}}"
 
   order-db:
     image: postgres:18
     container_name: order-db
+    restart: unless-stopped
     environment:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: orderdb
@@ -124,6 +137,7 @@ services:
   order-service:
     build: ./services/order-service
     container_name: order-service
+    restart: unless-stopped
     ports:
       - "3005:3005"
     environment:
@@ -140,11 +154,13 @@ services:
       options:
         loki-url: "http://localhost:3100/loki/api/v1/push"
         loki-retries: "5"
-        loki-batch-size: "400"  
+        loki-batch-size: "400"
+        loki-external-labels: "compose_service={{.Name}},container_name={{.Name}}"
 
   prometheus:
     image: prom/prometheus:latest
     container_name: prometheus
+    restart: unless-stopped
     ports:
       - "9090:9090"
     volumes:
@@ -160,6 +176,7 @@ services:
   grafana:
     image: grafana/grafana:latest
     container_name: grafana
+    restart: unless-stopped
     ports:
       - "3000:3000"
     environment:
@@ -175,6 +192,7 @@ services:
   loki:
     image: grafana/loki:latest
     container_name: loki
+    restart: unless-stopped
     ports:
       - "3100:3100"
     command: -config.file=/etc/loki/local-config.yaml
@@ -183,12 +201,18 @@ services:
   jaeger:
     image: jaegertracing/all-in-one:latest
     container_name: jaeger
+    restart: unless-stopped
     ports:
       - "16686:16686"   # Jaeger UI
       - "4317:4317"     # OTLP gRPC receiver (where your services send spans)
       - "4318:4318"     # OTLP HTTP receiver
     environment:
-      COLLECTOR_OTLP_ENABLED: "true"    
+      COLLECTOR_OTLP_ENABLED: "true"
+      # Cap the in-memory trace store. Left unbounded it grows for as long as
+      # the stack runs, and every /api/traces query scans more than the last --
+      # which is what dragged the collector from a 10s interval to ~350s over a
+      # four-hour run and took the Docker daemon down with it.
+      MEMORY_MAX_TRACES: "20000"
   k6:
     image: grafana/k6:latest
     container_name: k6
@@ -202,12 +226,21 @@ services:
   ai-engine:
     build: ./ai-engine
     container_name: ai-engine
+    restart: unless-stopped
+    environment:
+      COLLECT_INTERVAL: "10"
     volumes:
       - ./ai-engine/data:/app/data
+      # Models are trained inside the container but read from the host by
+      # detect.py and remediate.py, so this has to be shared or every training
+      # run is invisible outside the container.
+      - ./ai-engine/models:/app/models
     depends_on:
       - prometheus
+      - loki
+      - jaeger
     networks:
-      - default    
+      - default
 
 volumes:
   product-db-data:
